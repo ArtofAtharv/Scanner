@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Users, Utensils, Coffee, Moon, Edit2, Trash2, Check, X, Mail, Download, Upload } from "lucide-react";
+import { Users, Utensils, Coffee, Moon, Edit2, Trash2, Mail, Download, Upload } from "lucide-react";
 import * as XLSX from "xlsx";
 
 type Participant = {
@@ -29,10 +29,11 @@ export default function DashboardPage() {
 
   const [addingBulk, setAddingBulk] = useState(false);
   const [bulkText, setBulkText] = useState("");
+  const [bulkEmail, setBulkEmail] = useState(true);
   const [bulkProgress, setBulkProgress] = useState(0);
   const [bulkTotal, setBulkTotal] = useState(0);
 
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingParticipant, setEditingParticipant] = useState<Participant | null>(null);
   const [editForm, setEditForm] = useState({ name: "", email: "", role: "" });
   const [savingEdit, setSavingEdit] = useState(false);
   const [resendingId, setResendingId] = useState<string | null>(null);
@@ -92,7 +93,7 @@ export default function DashboardPage() {
           await fetch("/api/participants", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name, email, role, sendEmail: form.sendEmail }),
+            body: JSON.stringify({ name, email, role, sendEmail: bulkEmail }),
           });
         } catch (err) {
           console.error("Failed to add", email, err);
@@ -119,24 +120,21 @@ export default function DashboardPage() {
   };
 
   const startEdit = (p: Participant) => {
-    setEditingId(p.id);
+    setEditingParticipant(p);
     setEditForm({ name: p.name, email: p.email, role: p.role || "Participant" });
   };
 
-  const cancelEdit = () => {
-    setEditingId(null);
-  };
-
-  const saveEdit = async (id: string) => {
+  const saveEdit = async () => {
+    if (!editingParticipant) return;
     setSavingEdit(true);
     try {
-      const res = await fetch(`/api/participants/${id}`, {
+      const res = await fetch(`/api/participants/${editingParticipant.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(editForm),
       });
       if (res.ok) {
-        setEditingId(null);
+        setEditingParticipant(null);
         fetchParticipants();
       }
     } catch (err) {
@@ -219,7 +217,7 @@ export default function DashboardPage() {
   });
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-4 md:p-8">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-4 md:p-8 relative">
       <div className="max-w-7xl mx-auto space-y-8">
         <header className="flex flex-col md:flex-row items-center justify-between gap-4">
           <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-blue-500">
@@ -307,6 +305,19 @@ export default function DashboardPage() {
                   className="w-full px-4 py-2 text-sm rounded-md border border-gray-300 dark:border-gray-600 focus:ring-indigo-500 dark:bg-gray-900 dark:text-white h-32"
                 />
                 
+                <div className="flex items-center mt-2">
+                  <input
+                    type="checkbox"
+                    id="bulkSendEmail"
+                    checked={bulkEmail}
+                    onChange={(e) => setBulkEmail(e.target.checked)}
+                    className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+                  />
+                  <label htmlFor="bulkSendEmail" className="ml-2 block text-sm text-gray-900 dark:text-gray-300">
+                    Send Emails
+                  </label>
+                </div>
+
                 <div className="flex items-center justify-between">
                   <label className="flex items-center justify-center w-full px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-600 transition text-sm">
                     <Upload size={16} className="mr-2" />
@@ -316,14 +327,14 @@ export default function DashboardPage() {
                 </div>
 
                 {addingBulk && (
-                  <div className="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700 mt-2">
-                    <div className="bg-indigo-600 h-2.5 rounded-full" style={{ width: `${(bulkProgress / bulkTotal) * 100}%` }}></div>
+                  <div className="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700 mt-2 hover:opacity-100">
+                    <div className="bg-indigo-600 h-2.5 rounded-full transition-all duration-300" style={{ width: `${(bulkProgress / bulkTotal) * 100}%` }}></div>
                     <p className="text-xs text-center mt-1 text-gray-500">{bulkProgress} / {bulkTotal}</p>
                   </div>
                 )}
 
                 <button onClick={() => handleBulkSubmit()} disabled={addingBulk || !bulkText.trim()} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 rounded-md transition disabled:opacity-50 text-sm">
-                  {addingBulk ? "Processing..." : "Bulk Add"}
+                  {addingBulk ? "Processing..." : "Submit Bulk"}
                 </button>
               </div>
             </div>
@@ -360,28 +371,6 @@ export default function DashboardPage() {
                     <tr><td colSpan={6} className="px-6 py-8 text-center text-gray-500">No participants yet.</td></tr>
                   ) : (
                     sortedParticipants.map((p) => {
-                      const isEditing = editingId === p.id;
-                      if (isEditing) {
-                        return (
-                          <tr key={p.id} className="bg-indigo-50/50 dark:bg-indigo-900/20">
-                            <td className="px-4 md:px-6 py-4 space-y-2">
-                              <input type="text" value={editForm.name} onChange={(e) => setEditForm({...editForm, name: e.target.value})} className="w-full px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white" placeholder="Name" />
-                              <input type="email" value={editForm.email} onChange={(e) => setEditForm({...editForm, email: e.target.value})} className="w-full px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white" placeholder="Email" />
-                            </td>
-                            <td className="px-4 py-4">
-                              <select value={editForm.role} onChange={(e) => setEditForm({...editForm, role: e.target.value})} className="px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white">
-                                {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
-                              </select>
-                            </td>
-                            <td colSpan={3} className="px-3 py-4 text-xs text-gray-400">(Meals uneditable)</td>
-                            <td className="px-4 md:px-6 py-4 text-right space-x-3">
-                              <button onClick={() => saveEdit(p.id)} disabled={savingEdit} className="text-green-600 hover:text-green-800 transition"><Check size={18} /></button>
-                              <button onClick={cancelEdit} disabled={savingEdit} className="text-gray-400 hover:text-gray-600 transition"><X size={18} /></button>
-                            </td>
-                          </tr>
-                        );
-                      }
-
                       const ht = p.meal_usage?.find((m) => m.meal_type === "high_tea")?.is_used;
                       const lu = p.meal_usage?.find((m) => m.meal_type === "lunch")?.is_used;
                       const di = p.meal_usage?.find((m) => m.meal_type === "dinner")?.is_used;
@@ -401,7 +390,7 @@ export default function DashboardPage() {
                           <td className="px-3 py-4">{lu ? "✅" : "❌"}</td>
                           <td className="px-3 py-4">{di ? "✅" : "❌"}</td>
                           <td className="px-4 md:px-6 py-4 text-right">
-                            <div className="flex items-center justify-end space-x-3 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                            <div className="flex items-center justify-end space-x-3 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                               <button onClick={() => resendEmail(p.id)} disabled={resendingId === p.id} className="text-amber-500 hover:text-amber-700 disabled:opacity-50" title="Resend Email">
                                 <Mail size={16} />
                               </button>
@@ -423,6 +412,40 @@ export default function DashboardPage() {
           </section>
         </div>
       </div>
+
+      {editingParticipant && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-md p-6 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl space-y-5 animate-in zoom-in-95 duration-200">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Edit Participant</h2>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Name</label>
+                <input type="text" value={editForm.name} onChange={(e) => setEditForm({...editForm, name: e.target.value})} className="mt-1 w-full px-4 py-2 border rounded-md dark:border-gray-600 dark:bg-gray-900 dark:text-white" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Email</label>
+                <input type="email" value={editForm.email} onChange={(e) => setEditForm({...editForm, email: e.target.value})} className="mt-1 w-full px-4 py-2 border rounded-md dark:border-gray-600 dark:bg-gray-900 dark:text-white" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Role</label>
+                <select value={editForm.role} onChange={(e) => setEditForm({...editForm, role: e.target.value})} className="mt-1 w-full px-4 py-2 border rounded-md dark:border-gray-600 dark:bg-gray-900 dark:text-white">
+                  {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+              </div>
+            </div>
+            
+            <div className="flex justify-end space-x-3 pt-2">
+              <button disabled={savingEdit} onClick={() => setEditingParticipant(null)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600 transition">
+                Cancel
+              </button>
+              <button disabled={savingEdit} onClick={saveEdit} className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition">
+                {savingEdit ? "Saving..." : "Save Changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
