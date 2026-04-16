@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { Html5QrcodeScanner, Html5QrcodeScanType } from "html5-qrcode";
-import { Coffee, Utensils, Moon } from "lucide-react";
+import { Html5Qrcode } from "html5-qrcode";
+import { Coffee, Utensils, Moon, CheckCircle2, XCircle, AlertCircle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
 type ScanResult = "idle" | "success" | "already_used" | "invalid";
@@ -12,55 +12,94 @@ export default function ScanPage() {
   const [status, setStatus] = useState<ScanResult>("idle");
   const [participantName, setParticipantName] = useState<string>("");
   const [errorMessage, setErrorMessage] = useState<string>("");
+  
+  // Use refs to prevent multiple starts and handle scanner state without triggering re-renders
+  const scannerRef = useRef<Html5Qrcode | null>(null);
   const isScanning = useRef(false);
+  const currentMealType = useRef(mealType);
+
+  // Sync state to ref for access inside the callback
+  useEffect(() => {
+    currentMealType.current = mealType;
+  }, [mealType]);
 
   useEffect(() => {
-    if (status !== "idle") return; // Only render the scanner when we are in the idle state
-
-    const scanner = new Html5QrcodeScanner(
-      "reader",
-      {
-        fps: 10,
-        qrbox: { width: 250, height: 250 },
-        supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
-      },
-      /* verbose= */ false
-    );
-
-    scanner.render(onScanSuccess, onScanFailure);
-
-    function onScanSuccess(decodedText: string) {
-      if (isScanning.current) return;
-      isScanning.current = true;
-      handleVerify(decodedText);
+    if (status !== "idle") {
+      if (scannerRef.current) {
+        scannerRef.current.stop().then(() => {
+          scannerRef.current?.clear();
+          scannerRef.current = null;
+        }).catch(err => console.error("Error stopping scanner", err));
+      }
+      return;
     }
 
-    function onScanFailure() {
-      // Ignore routine scan failures
+    let isMounted = true;
+
+    const initScanner = async () => {
+      try {
+        if (!scannerRef.current) {
+          scannerRef.current = new Html5Qrcode("reader");
+        }
+        
+        await scannerRef.current.start(
+          { facingMode: "environment" },
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 250 },
+          },
+          (decodedText) => {
+            if (isScanning.current) return;
+            isScanning.current = true;
+            handleVerify(decodedText);
+          },
+          (errorMessage) => {
+            // Ignore routine frame errors
+          }
+        );
+      } catch (err) {
+        console.error("Camera start failed", err);
+      }
+    };
+
+    if (isMounted) {
+      initScanner();
     }
 
     return () => {
-      // The DOM node (#reader) is being unmounted when status changes.
-      // We explicitly clear the scanner to release the camera and prevent state update loops.
-      scanner.clear().catch((error) => console.error("Failed to clear scanner. ", error));
+      isMounted = false;
+      if (scannerRef.current && scannerRef.current.isScanning) {
+        scannerRef.current.stop().then(() => {
+          scannerRef.current?.clear();
+          scannerRef.current = null;
+        }).catch(e => console.error(e));
+      }
     };
-  }, [status, mealType]); // Depend on status so scanner rebuilds when we return to idle
+  }, [status]);
 
   const handleVerify = async (scannedText: string) => {
     try {
-      // Extract token if the QR code represents the full URL
+      // Safely stop the scanner and teardown BEFORE updating the status
+      // This prevents the DOM unmounting from crashing the active scanner pipeline.
+      if (scannerRef.current && scannerRef.current.isScanning) {
+        try {
+          await scannerRef.current.stop();
+          scannerRef.current.clear();
+          scannerRef.current = null;
+        } catch (e) {
+          console.error("Scanner teardown catch:", e);
+        }
+      }
+
       let token = scannedText;
       if (scannedText.includes("?token=")) {
         try {
           token = new URL(scannedText).searchParams.get("token") || scannedText;
-        } catch (e) {
-          // If URL parsing fails, fallback to the raw text
-        }
+        } catch (e) {}
       }
 
-      // Call edge function securely using the Supabase client
       const { data, error } = await supabase.functions.invoke("verify-scan", {
-        body: { token, meal_type: mealType },
+        body: { token, meal_type: currentMealType.current },
       });
 
       if (error) throw new Error("Supabase Fetch: " + error.message);
@@ -81,7 +120,6 @@ export default function ScanPage() {
         playBeep(200, 300);
         setErrorMessage("Token not found in database.");
       }
-
     } catch (err: any) {
       console.error(err);
       setStatus("invalid");
@@ -113,32 +151,32 @@ export default function ScanPage() {
   const statusColors = {
     idle: "bg-gray-100 dark:bg-gray-900",
     success: "bg-green-500",
-    already_used: "bg-red-500",
-    invalid: "bg-yellow-500",
+    already_used: "bg-amber-500",
+    invalid: "bg-red-600",
   };
 
   return (
     <div className={`min-h-screen transition-colors duration-300 flex flex-col items-center justify-center p-4 ${statusColors[status]}`}>
       {status === "idle" ? (
         <div className="w-full max-w-sm bg-white dark:bg-gray-800 rounded-3xl overflow-hidden shadow-2xl p-6 space-y-6">
+          <p className="text-center font-medium text-gray-500 dark:text-gray-400">
+            Scanning for: <span className="font-bold text-gray-900 dark:text-white uppercase">{mealType.replace("_", " ")}</span>
+          </p>
+
+          <div id="reader" className="w-full rounded-2xl overflow-hidden border-2 border-indigo-100 dark:border-indigo-900 min-h-[250px] bg-black flex items-center justify-center" />
+          
           <div className="flex justify-between items-center bg-gray-100 dark:bg-gray-900 p-2 rounded-2xl">
             <MealButton type="high_tea" current={mealType} set={setMealType} Icon={Coffee} label="High Tea" />
             <MealButton type="lunch" current={mealType} set={setMealType} Icon={Utensils} label="Lunch" />
             <MealButton type="dinner" current={mealType} set={setMealType} Icon={Moon} label="Dinner" />
           </div>
 
-          <div id="reader" className="w-full rounded-2xl overflow-hidden border-2 border-indigo-100 dark:border-indigo-900" />
-          
-          <p className="text-center font-medium text-gray-500 dark:text-gray-400">
-            Scanning for: <span className="font-bold text-gray-900 dark:text-white uppercase">{mealType.replace("_", " ")}</span>
-          </p>
-
           <button
             onClick={() => {
               document.cookie = "auth_role=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
               window.location.href = "/";
             }}
-            className="w-full text-center text-sm font-medium text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+            className="w-full text-center text-sm font-medium text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 mt-4"
           >
             Logout
           </button>
@@ -148,7 +186,7 @@ export default function ScanPage() {
           {status === "success" && (
             <>
               <div className="w-32 h-32 rounded-full border-4 border-white flex items-center justify-center mb-4">
-                <span className="text-6xl">✅</span>
+                <CheckCircle2 size={80} className="text-white" />
               </div>
               <h1 className="text-5xl font-black uppercase tracking-tight shadow-sm">VALID SCAN</h1>
               <p className="text-3xl font-semibold opacity-90">{mealType.replace("_", " ").toUpperCase()}</p>
@@ -162,7 +200,7 @@ export default function ScanPage() {
           {status === "already_used" && (
             <>
               <div className="w-32 h-32 rounded-full border-4 border-white flex items-center justify-center mb-4">
-                <span className="text-6xl">❌</span>
+                <AlertCircle size={80} className="text-white" />
               </div>
               <h1 className="text-5xl font-black uppercase tracking-tight shadow-sm">ALREADY USED</h1>
               <p className="text-2xl font-semibold opacity-90">{participantName} has already claimed this meal.</p>
@@ -172,7 +210,7 @@ export default function ScanPage() {
           {status === "invalid" && (
             <>
               <div className="w-32 h-32 rounded-full border-4 border-black/50 flex items-center justify-center mb-4">
-                <span className="text-6xl">⚠️</span>
+                <XCircle size={80} className="text-black/80" />
               </div>
               <h1 className="text-6xl font-black uppercase tracking-tight text-black/80">INVALID QR</h1>
               <p className="text-2xl font-medium text-black/60">{errorMessage || "Ticket not recognized in the system."}</p>

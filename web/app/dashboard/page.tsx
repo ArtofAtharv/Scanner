@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Users, Utensils, Coffee, Moon, Edit2, Trash2, Mail, Download, Upload } from "lucide-react";
+import { Users, Utensils, Coffee, Moon, Edit2, Trash2, Mail, Download, Upload, Check, X } from "lucide-react";
 import * as XLSX from "xlsx";
 
 type Participant = {
@@ -358,9 +358,9 @@ export default function DashboardPage() {
                   <tr>
                     <th className="px-4 md:px-6 py-3 font-medium">Name & Email</th>
                     <th className="px-4 py-3 font-medium cursor-pointer" title="Sorted automatically">Role ↓</th>
-                    <th className="px-3 py-3 font-medium cursor-help" title="High Tea">☕ HT</th>
-                    <th className="px-3 py-3 font-medium cursor-help" title="Lunch">🍱 LU</th>
-                    <th className="px-3 py-3 font-medium cursor-help" title="Dinner">🌙 DI</th>
+                    <th className="px-3 py-3 font-medium cursor-help" title="High Tea"><div className="flex items-center gap-1"><Coffee size={14}/> HT</div></th>
+                    <th className="px-3 py-3 font-medium cursor-help" title="Lunch"><div className="flex items-center gap-1"><Utensils size={14}/> LU</div></th>
+                    <th className="px-3 py-3 font-medium cursor-help" title="Dinner"><div className="flex items-center gap-1"><Moon size={14}/> DI</div></th>
                     <th className="px-4 md:px-6 py-3 font-medium text-right">Actions</th>
                   </tr>
                 </thead>
@@ -386,9 +386,9 @@ export default function DashboardPage() {
                               {p.role || "Participant"}
                             </span>
                           </td>
-                          <td className="px-3 py-4">{ht ? "✅" : "❌"}</td>
-                          <td className="px-3 py-4">{lu ? "✅" : "❌"}</td>
-                          <td className="px-3 py-4">{di ? "✅" : "❌"}</td>
+                          <td className="px-3 py-4">{ht ? <Check size={18} className="text-green-500" /> : <X size={18} className="text-red-500" />}</td>
+                          <td className="px-3 py-4">{lu ? <Check size={18} className="text-green-500" /> : <X size={18} className="text-red-500" />}</td>
+                          <td className="px-3 py-4">{di ? <Check size={18} className="text-green-500" /> : <X size={18} className="text-red-500" />}</td>
                           <td className="px-4 md:px-6 py-4 text-right">
                             <div className="flex items-center justify-end space-x-3 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                               <button onClick={() => resendEmail(p.id)} disabled={resendingId === p.id} className="text-amber-500 hover:text-amber-700 disabled:opacity-50" title="Resend Email">
