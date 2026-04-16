@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
 
-    const { name, email, role = "Participant" } = await req.json();
+    const { name, email, role = "Participant", sendEmail = true } = await req.json();
 
     if (!name || !email) {
       return NextResponse.json({ error: "Name and email required" }, { status: 400 });
@@ -33,59 +33,61 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: insertError.message }, { status: 500 });
     }
 
-    // 2. Generate QR Code and PDF
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-    const qrDataUrl = await QRCode.toDataURL(`${appUrl}/scan?token=${token}`, { margin: 1 });
-    
-    // Create PDF
-    const pdfDoc = await PDFDocument.create();
-    const page = pdfDoc.addPage([400, 500]);
-    const qrImageResponse = await fetch(qrDataUrl);
-    const qrImageArrayBuffer = await qrImageResponse.arrayBuffer();
-    const qrImage = await pdfDoc.embedPng(qrImageArrayBuffer);
-    
-    page.drawText(`Hello ${name},`, { x: 50, y: 450, size: 24, color: rgb(0, 0, 0) });
-    page.drawText(`Role: ${role}`, { x: 50, y: 410, size: 18, color: rgb(0.3, 0.3, 0.3) });
-    page.drawText(`Present this code at the event scanners:`, { x: 50, y: 380, size: 14, color: rgb(0, 0, 0) });
-    page.drawImage(qrImage, { x: 50, y: 50, width: 300, height: 300 });
-    
-    const pdfBytes = await pdfDoc.save();
-    const pdfBuffer = Buffer.from(pdfBytes);
+    if (sendEmail) {
+      // 2. Generate QR Code and PDF
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+      const qrDataUrl = await QRCode.toDataURL(`${appUrl}/scan?token=${token}`, { margin: 1 });
+      
+      // Create PDF
+      const pdfDoc = await PDFDocument.create();
+      const page = pdfDoc.addPage([400, 500]);
+      const qrImageResponse = await fetch(qrDataUrl);
+      const qrImageArrayBuffer = await qrImageResponse.arrayBuffer();
+      const qrImage = await pdfDoc.embedPng(qrImageArrayBuffer);
+      
+      page.drawText(`Hello ${name},`, { x: 50, y: 450, size: 24, color: rgb(0, 0, 0) });
+      page.drawText(`Role: ${role}`, { x: 50, y: 410, size: 18, color: rgb(0.3, 0.3, 0.3) });
+      page.drawText(`Present this code at the event scanners:`, { x: 50, y: 380, size: 14, color: rgb(0, 0, 0) });
+      page.drawImage(qrImage, { x: 50, y: 50, width: 300, height: 300 });
+      
+      const pdfBytes = await pdfDoc.save();
+      const pdfBuffer = Buffer.from(pdfBytes);
 
-    // 3. Send Email using Nodemailer
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST || "smtp.ethereal.email",
-      port: Number(process.env.SMTP_PORT) || 587,
-      auth: {
-        user: process.env.SMTP_USER || "dummy_user",
-        pass: process.env.SMTP_PASS || "dummy_pass",
-      },
-    });
-
-    try {
-      await transporter.sendMail({
-        from: '"Event Team" <no-reply@event.com>',
-        to: email,
-        subject: "Your Event QR Code Pass",
-        html: `
-          <div style="font-family: Arial, sans-serif; text-align: center; color: #333;">
-            <h2>Hello, ${name}!</h2>
-            <p>Please find attached your QR code pass for the event.</p>
-            <p><strong>Role:</strong> ${role}</p>
-            <p>If you have trouble downloading the PDF, your manual token is: ${token}</p>
-          </div>
-        `,
-        attachments: [
-          {
-            filename: 'Event_QR_Pass.pdf',
-            content: pdfBuffer,
-            contentType: 'application/pdf',
-          }
-        ]
+      // 3. Send Email using Nodemailer
+      const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST || "smtp.ethereal.email",
+        port: Number(process.env.SMTP_PORT) || 587,
+        auth: {
+          user: process.env.SMTP_USER || "dummy_user",
+          pass: process.env.SMTP_PASS || "dummy_pass",
+        },
       });
-    } catch (emailError: any) {
-      console.warn("Email failed to send, but participant was created", emailError);
-      // Not returning 500 here since DB creation succeeded
+
+      try {
+        await transporter.sendMail({
+          from: '"Event Team" <no-reply@event.com>',
+          to: email,
+          subject: "Your Event QR Code Pass",
+          html: `
+            <div style="font-family: Arial, sans-serif; text-align: center; color: #333;">
+              <h2>Hello, ${name}!</h2>
+              <p>Please find attached your QR code pass for the event.</p>
+              <p><strong>Role:</strong> ${role}</p>
+              <p>If you have trouble downloading the PDF, your manual token is: ${token}</p>
+            </div>
+          `,
+          attachments: [
+            {
+              filename: 'Event_QR_Pass.pdf',
+              content: pdfBuffer,
+              contentType: 'application/pdf',
+            }
+          ]
+        });
+      } catch (emailError: any) {
+        console.warn("Email failed to send, but participant was created", emailError);
+        // Not returning 500 here since DB creation succeeded
+      }
     }
 
     return NextResponse.json({ success: true, participant });
