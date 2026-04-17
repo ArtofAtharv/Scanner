@@ -49,7 +49,7 @@ export default function LandingPage() {
               type="password"
               value={inviteCode}
               onChange={(e) => setInviteCode(e.target.value)}
-              placeholder="Invite Code (e.g. admin123 or scan123)"
+              placeholder="Invite Code (e.g. scan123)"
               className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-700 focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-900 transition-all"
               required
             />
