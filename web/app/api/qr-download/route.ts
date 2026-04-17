@@ -37,10 +37,10 @@ export async function POST(req: NextRequest) {
         role: "Admin Master",
         token: "MASTER_QR_UNLIMITED",
       });
-      return new NextResponse(pdfBytes, {
+      return new NextResponse(Buffer.from(pdfBytes), {
         headers: {
           "Content-Type": "application/pdf",
-          "Content-Disposition": `attachment; filename="Master Key's Coupon.pdf"`,
+          "Content-Disposition": `attachment; filename="Master_QR.pdf"`,
         },
       });
     }
@@ -65,11 +65,10 @@ export async function POST(req: NextRequest) {
     if (participants.length === 1) {
       const p = participants[0];
       const pdfBytes = await generateQRForParticipant(p);
-      const safeName = p.name.replace(/[^a-zA-Z0-9 ]/g, "").trim();
-      return new NextResponse(pdfBytes, {
+      return new NextResponse(Buffer.from(pdfBytes), {
         headers: {
           "Content-Type": "application/pdf",
-          "Content-Disposition": `attachment; filename="${safeName}'s Coupon.pdf"`,
+          "Content-Disposition": `attachment; filename="QR_${p.name.replace(/[^a-z0-9]/gi, '_')}.pdf"`,
         },
       });
     }
@@ -77,12 +76,11 @@ export async function POST(req: NextRequest) {
     const zip = new JSZip();
     for (const p of participants) {
       const pdfBytes = await generateQRForParticipant(p);
-      const safeName = p.name.replace(/[^a-zA-Z0-9 ]/g, "").trim();
-      zip.file(`${safeName}'s Coupon.pdf`, pdfBytes);
+      zip.file(`QR_${p.name.replace(/[^a-z0-9]/gi, '_')}.pdf`, pdfBytes);
     }
     const zipBuffer = await zip.generateAsync({ type: "uint8array" });
     
-    return new NextResponse(zipBuffer, {
+    return new NextResponse(Buffer.from(zipBuffer), {
       headers: {
         "Content-Type": "application/zip",
         "Content-Disposition": `attachment; filename="Bulk_QRs.zip"`,
