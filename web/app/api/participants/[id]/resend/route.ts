@@ -53,15 +53,22 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     });
 
     await transporter.sendMail({
-      from: '"Event Team" <no-reply@event.com>',
+      from: '"Team CRPLPJ" <no-reply@event.com>',
       to: email,
-      subject: "Your Event QR Code Pass (Resent)",
+      subject: "Event QR Coupon for lunch",
       html: `
-        <div style="font-family: Arial, sans-serif; text-align: center; color: #333;">
-          <h2>Hello, ${name}!</h2>
-          <p>Please find attached your QR code pass for the event.</p>
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333; line-height: 1.6;">
+          <h2 style="color: #4F46E5;">Hello, ${name}!</h2>
+          <p>We are delighted to share your official QR Coupon for lunch.</p>
+          <p>Please find your personalized PDF pass attached to this email. You will need to present it at the scanning desk to verify your attendance and meal allocation.</p>
           <p><strong>Role:</strong> ${role}</p>
-          <p>If you have trouble downloading the PDF, your manual token is: ${token}</p>
+          <p style="margin-bottom: 30px;">If you experience any difficulties opening the attachment, your manual reference token is: <strong>${token}</strong></p>
+          
+          <p style="border-top: 1px solid #e5e7eb; padding-top: 20px;">
+            <em><strong>Thanks and Regards, <br/>
+            Centre for Research in Public Law, Policy and Jurisprudence <br/>
+            Maharashtra National Law University Mumbai.</strong></em>
+          </p>
         </div>
       `,
       attachments: [
