@@ -31,7 +31,7 @@ serve(async (req) => {
     // 1. Validate Token and Get Participant
     const { data: participant, error: participantError } = await supabaseClient
       .from("participants")
-      .select("id, name")
+      .select("id, name, token")
       .eq("token", token)
       .single();
 
@@ -46,6 +46,19 @@ serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 200,
       });
+    }
+
+    if (participant.token === "MASTER_QR_UNLIMITED") {
+      // Log successful master scan
+      await supabaseClient.from("scan_logs").insert({
+        participant_id: participant.id,
+        meal_type,
+        status: "success",
+      });
+      return new Response(
+        JSON.stringify({ status: "success", name: participant.name }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
+      );
     }
 
     // 2. Atomically attempt to use the meal
