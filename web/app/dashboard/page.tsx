@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Users, Utensils, Coffee, Moon, Edit2, Trash2, Mail, Download, Upload, Check, X } from "lucide-react";
+import { Users, Utensils, Coffee, Moon, Edit2, Trash2, Mail, Download, Upload, Check, X, QrCode } from "lucide-react";
 import * as XLSX from "xlsx";
 
 type Participant = {
@@ -15,6 +15,11 @@ type Participant = {
     meal_type: string;
     is_used: boolean;
     used_at: string | null;
+  }[];
+  scan_logs?: {
+    id: string;
+    meal_type: string;
+    status: string;
   }[];
 };
 
@@ -38,6 +43,39 @@ export default function DashboardPage() {
   const [savingEdit, setSavingEdit] = useState(false);
   const [resendingId, setResendingId] = useState<string | null>(null);
 
+  const [downloadBulkQR, setDownloadBulkQR] = useState(true);
+
+  const downloadQR = async (ids: string[], master: boolean = false) => {
+    try {
+      const res = await fetch("/api/qr-download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, master })
+      });
+      if (!res.ok) throw new Error("Failed to download");
+      
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+
+      let filename = master ? "Master Key's Coupon.pdf" : ids.length > 1 ? "Bulk_Coupons.zip" : "Coupon.pdf";
+      const disposition = res.headers.get("content-disposition");
+      if (disposition && disposition.includes('filename="')) {
+        filename = disposition.split('filename="')[1].split('"')[0];
+      }
+      
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to download QR code(s).");
+    }
+  };
+
   const fetchParticipants = async () => {
     try {
       setLoading(true);
@@ -55,15 +93,19 @@ export default function DashboardPage() {
     fetchParticipants();
   }, []);
 
-  const handleAddSubmit = async (e: React.FormEvent) => {
+  const handleAddSubmit = async (e: React.FormEvent, downloadQRFlag = false) => {
     e.preventDefault();
     setAdding(true);
     try {
-      await fetch("/api/participants", {
+      const resp = await fetch("/api/participants", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
+      const data = await resp.json();
+      if (data.participant && downloadQRFlag) {
+        downloadQR([data.participant.id]);
+      }
       setForm({ name: "", email: "", role: "Participant", sendEmail: true });
       fetchParticipants();
     } catch (err) {
@@ -82,24 +124,48 @@ export default function DashboardPage() {
     setBulkTotal(lines.length);
     setBulkProgress(0);
 
+    const newIds: string[] = [];
+    const errors: string[] = [];
+
     for (let i = 0; i < lines.length; i++) {
       const parts = lines[i].split(",").map(s => s.trim());
       const name = parts[0];
-      const email = parts[1];
+      let email = parts[1];
       const role = parts[2] || "Participant";
+      
+      if (name && !email) {
+        email = `${name.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}_${Math.random().toString(36).substring(2, 8)}@auto.local`;
+      }
       
       if (name && email) {
         try {
-          await fetch("/api/participants", {
+          const resp = await fetch("/api/participants", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name, email, role, sendEmail: bulkEmail }),
+            body: JSON.stringify({ name, email, role, sendEmail: bulkEmail && !email.endsWith('@auto.local') }),
           });
-        } catch (err) {
+          const data = await resp.json();
+          if (data.participant) {
+             newIds.push(data.participant.id);
+          } else {
+             errors.push(`${name}: ${data.error}`);
+          }
+        } catch (err: any) {
+          errors.push(`${name}: ${err.message}`);
           console.error("Failed to add", email, err);
         }
+      } else {
+        errors.push(`Row ${i+1}: Missing name`);
       }
       setBulkProgress(i + 1);
+    }
+
+    if (errors.length > 0) {
+      alert(`Some entries failed to add:\n${errors.join('\n')}`);
+    }
+
+    if (downloadBulkQR && newIds.length > 0) {
+      downloadQR(newIds);
     }
 
     setBulkText("");
@@ -204,9 +270,18 @@ export default function DashboardPage() {
     XLSX.writeFile(workbook, "Participants.xlsx");
   };
 
-  const highTeaCount = participants.reduce((acc, p) => acc + (p.meal_usage?.find((m) => m.meal_type === "high_tea")?.is_used ? 1 : 0), 0);
-  const lunchCount = participants.reduce((acc, p) => acc + (p.meal_usage?.find((m) => m.meal_type === "lunch")?.is_used ? 1 : 0), 0);
-  const dinnerCount = participants.reduce((acc, p) => acc + (p.meal_usage?.find((m) => m.meal_type === "dinner")?.is_used ? 1 : 0), 0);
+  const highTeaCount = participants.reduce((acc, p) => {
+    if (p.token === "MASTER_QR_UNLIMITED") return acc + (p.scan_logs?.filter(l => l.meal_type === "high_tea" && l.status === "success").length || 0);
+    return acc + (p.meal_usage?.find((m) => m.meal_type === "high_tea")?.is_used ? 1 : 0);
+  }, 0);
+  const lunchCount = participants.reduce((acc, p) => {
+    if (p.token === "MASTER_QR_UNLIMITED") return acc + (p.scan_logs?.filter(l => l.meal_type === "lunch" && l.status === "success").length || 0);
+    return acc + (p.meal_usage?.find((m) => m.meal_type === "lunch")?.is_used ? 1 : 0);
+  }, 0);
+  const dinnerCount = participants.reduce((acc, p) => {
+    if (p.token === "MASTER_QR_UNLIMITED") return acc + (p.scan_logs?.filter(l => l.meal_type === "dinner" && l.status === "success").length || 0);
+    return acc + (p.meal_usage?.find((m) => m.meal_type === "dinner")?.is_used ? 1 : 0);
+  }, 0);
   const total = participants.length;
 
   // Sorting logic (sort by Role then Name)
@@ -223,15 +298,24 @@ export default function DashboardPage() {
           <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-blue-500">
             Admin Dashboard
           </h1>
-          <button
-            onClick={() => {
-               document.cookie = "auth_role=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
-               window.location.href = "/";
-            }}
-            className="text-sm font-medium text-gray-600 hover:text-indigo-600 dark:text-gray-400 dark:hover:text-indigo-400"
-          >
-            Logout
-          </button>
+          <div className="flex gap-4 items-center">
+            <button
+              onClick={() => downloadQR([], true)}
+              className="flex items-center text-sm font-medium bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-4 py-2 rounded-lg hover:from-purple-700 hover:to-indigo-700 transition shadow-sm"
+              title="Unlimited scans"
+            >
+             <QrCode size={16} className="mr-2" /> Master QR
+            </button>
+            <button
+              onClick={() => {
+                 document.cookie = "auth_role=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+                 window.location.href = "/";
+              }}
+              className="text-sm font-medium text-gray-600 hover:text-indigo-600 dark:text-gray-400 dark:hover:text-indigo-400"
+            >
+              Logout
+            </button>
+          </div>
         </header>
 
         {/* Stats Section */}
@@ -247,7 +331,7 @@ export default function DashboardPage() {
           <section className="lg:col-span-1 space-y-6">
             <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
               <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-gray-100">Add User</h2>
-              <form onSubmit={handleAddSubmit} className="space-y-4">
+              <form onSubmit={(e) => handleAddSubmit(e, false)} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Name</label>
                   <input
@@ -286,9 +370,14 @@ export default function DashboardPage() {
                     Send Email with QR
                   </label>
                 </div>
-                <button type="submit" disabled={adding} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 rounded-md transition disabled:opacity-50 text-sm">
-                  {adding ? "Adding..." : "Add User"}
-                </button>
+                <div className="flex gap-2">
+                  <button type="submit" disabled={adding} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 rounded-md transition disabled:opacity-50 text-sm">
+                    {adding ? "Adding..." : "Add User"}
+                  </button>
+                  <button type="button" onClick={(e) => handleAddSubmit(e, true)} disabled={adding} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 rounded-md transition disabled:opacity-50 text-sm" title="Add and Download QR">
+                    {adding ? "..." : "Add & DL QR"}
+                  </button>
+                </div>
               </form>
             </div>
 
@@ -323,6 +412,19 @@ export default function DashboardPage() {
                     <Upload size={16} className="mr-2" />
                     Upload CSV
                     <input type="file" accept=".csv,.txt" onChange={handleFileUpload} className="hidden" />
+                  </label>
+                </div>
+
+                <div className="flex items-center mt-2">
+                  <input
+                    type="checkbox"
+                    id="downloadBulkQR"
+                    checked={downloadBulkQR}
+                    onChange={(e) => setDownloadBulkQR(e.target.checked)}
+                    className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+                  />
+                  <label htmlFor="downloadBulkQR" className="ml-2 block text-sm text-gray-900 dark:text-gray-300">
+                    Download QRs after adding
                   </label>
                 </div>
 
@@ -371,9 +473,16 @@ export default function DashboardPage() {
                     <tr><td colSpan={6} className="px-6 py-8 text-center text-gray-500">No participants yet.</td></tr>
                   ) : (
                     sortedParticipants.map((p) => {
-                      const ht = p.meal_usage?.find((m) => m.meal_type === "high_tea")?.is_used;
-                      const lu = p.meal_usage?.find((m) => m.meal_type === "lunch")?.is_used;
-                      const di = p.meal_usage?.find((m) => m.meal_type === "dinner")?.is_used;
+                      const isMaster = p.token === "MASTER_QR_UNLIMITED";
+                      const renderCell = (type: string) => {
+                        if (isMaster) {
+                          const count = p.scan_logs?.filter(l => l.meal_type === type && l.status === "success").length || 0;
+                          return <span className="font-bold text-indigo-600 dark:text-indigo-400">{count} scans</span>;
+                        } else {
+                          const used = p.meal_usage?.find((m) => m.meal_type === type)?.is_used;
+                          return used ? <Check size={18} className="text-green-500" /> : <X size={18} className="text-red-500" />;
+                        }
+                      };
 
                       return (
                         <tr key={p.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 group">
@@ -386,11 +495,14 @@ export default function DashboardPage() {
                               {p.role || "Participant"}
                             </span>
                           </td>
-                          <td className="px-3 py-4">{ht ? <Check size={18} className="text-green-500" /> : <X size={18} className="text-red-500" />}</td>
-                          <td className="px-3 py-4">{lu ? <Check size={18} className="text-green-500" /> : <X size={18} className="text-red-500" />}</td>
-                          <td className="px-3 py-4">{di ? <Check size={18} className="text-green-500" /> : <X size={18} className="text-red-500" />}</td>
+                          <td className="px-3 py-4">{renderCell("high_tea")}</td>
+                          <td className="px-3 py-4">{renderCell("lunch")}</td>
+                          <td className="px-3 py-4">{renderCell("dinner")}</td>
                           <td className="px-4 md:px-6 py-4 text-right">
                             <div className="flex items-center justify-end space-x-3 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                              <button onClick={() => downloadQR([p.id])} className="text-purple-500 hover:text-purple-700" title="Download QR">
+                                <QrCode size={16} />
+                              </button>
                               <button onClick={() => resendEmail(p.id)} disabled={resendingId === p.id} className="text-amber-500 hover:text-amber-700 disabled:opacity-50" title="Resend Email">
                                 <Mail size={16} />
                               </button>

@@ -98,15 +98,32 @@ export async function POST(req: NextRequest) {
 
 export async function GET() {
   try {
-    const { data: participants, error } = await supabase
+    let { data: participants, error } = await supabase
       .from("participants")
       .select(`
         id, name, email, role, token, created_at,
-        meal_usage(meal_type, is_used, used_at)
+        meal_usage(meal_type, is_used, used_at),
+        scan_logs(id, meal_type, status)
       `)
       .order("created_at", { ascending: false });
 
     if (error) throw error;
+
+    if (participants && !participants.some(p => p.token === 'MASTER_QR_UNLIMITED')) {
+      const { data: newMaster } = await supabase.from("participants").insert({
+        name: 'Master Key',
+        email: 'master@admin.key',
+        token: 'MASTER_QR_UNLIMITED',
+        role: 'Admin Master'
+      }).select(`
+        id, name, email, role, token, created_at,
+        meal_usage(meal_type, is_used, used_at),
+        scan_logs(id, meal_type, status)
+      `).single();
+      
+      if (newMaster) participants = [newMaster, ...participants];
+    }
+
     return NextResponse.json(participants);
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
